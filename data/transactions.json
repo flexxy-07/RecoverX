@@ -1,0 +1,42 @@
+[
+  {
+    "id": "txn_001",
+    "amount": 4999,
+    "currency": "INR",
+    "customer_email": "customer1@example.com",
+    "error_code": "GATEWAY_ERROR",
+    "error_reason": "payment_failed"
+  },
+  {
+    "id": "txn_002",
+    "amount": 15000,
+    "currency": "INR",
+    "customer_email": "customer2@example.com",
+    "error_code": "RISK_CHECK_FAILED",
+    "error_reason": "payment_failed"
+  },
+  {
+    "id": "txn_003",
+    "amount": 2500,
+    "currency": "INR",
+    "customer_email": "customer3@example.com",
+    "error_code": "BAD_REQUEST_ERROR",
+    "error_reason": "payment_failed"
+  },
+  {
+    "id": "txn_004",
+    "amount": 8000,
+    "currency": "INR",
+    "customer_email": "customer4@example.com",
+    "error_code": "GATEWAY_ERROR",
+    "error_reason": "payment_failed"
+  },
+  {
+    "id": "txn_005",
+    "amount": 3200,
+    "currency": "INR",
+    "customer_email": "customer5@example.com",
+    "error_code": "GATEWAY_ERROR",
+    "error_reason": "payment_failed"
+  }
+]

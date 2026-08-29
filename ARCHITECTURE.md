@@ -53,3 +53,14 @@ for a plain list key is overwrite, not append).
 
 Gemini integration, Razorpay integration, Firestore, Flutter, real execution, dashboard,
 production auth.
+
+
+## Implementation note: classify is registered via a late-binding wrapper
+
+`graph.py` does NOT do `from app.graph.nodes.classify import classify`. It imports the
+module and wraps the call in a lambda that looks up `classify_module.classify` at call
+time, not at import time. This is required for tests to be able to swap in different fake
+diagnosis behavior per scenario (see run_test.py). See DECISIONS.md for the full story.
+
+
+guardrail_router now also checks proposed_action for the money-moving-actions filter, so a future reader doesn't have to rediscover this from the code alone.
