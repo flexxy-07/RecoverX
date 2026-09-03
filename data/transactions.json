@@ -4,23 +4,35 @@
     "amount": 4999,
     "currency": "INR",
     "customer_email": "customer1@example.com",
+    "method": "card",
     "error_code": "GATEWAY_ERROR",
-    "error_reason": "payment_failed"
+    "error_description": "Gateway timed out while processing the payment.",
+    "error_source": "gateway",
+    "error_step": "payment_authorization",
+    "error_reason": "gateway_timeout"
   },
   {
     "id": "txn_002",
     "amount": 15000,
     "currency": "INR",
     "customer_email": "customer2@example.com",
+    "method": "upi",
     "error_code": "RISK_CHECK_FAILED",
-    "error_reason": "payment_failed"
+    "error_description": "Transaction blocked by fraud risk engine.",
+    "error_source": "gateway",
+    "error_step": "risk_check",
+    "error_reason": "risk_check_failed"
   },
   {
     "id": "txn_003",
     "amount": 2500,
     "currency": "INR",
     "customer_email": "customer3@example.com",
+    "method": "card",
     "error_code": "BAD_REQUEST_ERROR",
+    "error_description": "Payment failed.",
+    "error_source": "gateway",
+    "error_step": "payment_authorization",
     "error_reason": "payment_failed"
   },
   {
@@ -28,15 +40,23 @@
     "amount": 8000,
     "currency": "INR",
     "customer_email": "customer4@example.com",
+    "method": "netbanking",
     "error_code": "GATEWAY_ERROR",
-    "error_reason": "payment_failed"
+    "error_description": "Gateway temporarily unavailable.",
+    "error_source": "gateway",
+    "error_step": "payment_authorization",
+    "error_reason": "gateway_timeout"
   },
   {
     "id": "txn_005",
     "amount": 3200,
     "currency": "INR",
     "customer_email": "customer5@example.com",
+    "method": "card",
     "error_code": "GATEWAY_ERROR",
-    "error_reason": "payment_failed"
+    "error_description": "Temporary gateway glitch, minimal detail available.",
+    "error_source": "gateway",
+    "error_step": "payment_authorization",
+    "error_reason": "gateway_timeout"
   }
 ]
