@@ -7,9 +7,14 @@ from app.models.diagnosis import Diagnosis
 
 load_dotenv()
 
-_client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
 
-MODEL_NAME = "gemini-flash-latest"
+
+def _get_client() -> genai.Client:
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        raise ValueError("GEMINI_API_KEY is not set in environment or .env")
+    return genai.Client(api_key=api_key)
 
 SYSTEM_PROMPT = """You are a payment failure diagnosis classifier for RecoverX, a payment
 recovery system. Your ONLY job is to classify why a payment failed. You
@@ -69,7 +74,8 @@ def _call_gemini(transaction: dict) -> Diagnosis:
     """
     
     payload = _build_payload(transaction)
-    response = _client.models.generate_content(
+    client = _get_client()
+    response = client.models.generate_content(
         model=MODEL_NAME,
         contents=(
             f"Payment failure details: \n{payload}\n\n"
@@ -78,8 +84,8 @@ def _call_gemini(transaction: dict) -> Diagnosis:
         config={
             "system_instruction": SYSTEM_PROMPT,
             "response_mime_type": "application/json",
-            "response_schema": Diagnosis
-        }
+            "response_schema": Diagnosis,
+        },
     )
     # response.parsed is already a validated Diagnosis instance when
     # response_schema is a Pydantic model. If Gemini's output doesn't
@@ -87,9 +93,13 @@ def _call_gemini(transaction: dict) -> Diagnosis:
     # returning a broken object — that failure propagates up to
     # classify()'s except block below.
     diagnosis = response.parsed
-    if diagnosis is None:
-        raise ValueError("Gemini returned no parsable output.")
-    return diagnosis
+    if isinstance(diagnosis, Diagnosis):
+        return diagnosis
+    if isinstance(diagnosis, dict):
+        return Diagnosis.model_validate(diagnosis)
+    if response.text:
+        return Diagnosis.model_validate_json(response.text)
+    raise ValueError("Gemini returned no parsable Diagnosis output.")
 def classify(state: RecoveryState) -> dict:
     transaction = state["transaction"]
 

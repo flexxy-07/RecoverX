@@ -44,7 +44,7 @@ def order_status_router(state: RecoveryState) -> str:
 
 
 def build_graph():
-    workflow = StateGraph(RecoveryState)
+    workflow = StateGraph(RecoveryState)  # type: ignore[bad-specialization] 
 
     workflow.add_node("ingest", ingest)
     # Wrapper, not a direct function reference — this looks up
