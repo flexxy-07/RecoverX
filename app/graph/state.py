@@ -2,7 +2,7 @@ from typing import Annotated
 from typing_extensions import TypedDict
 import operator
 
-class RecoveryState(TypedDict):
+class RecoveryState(TypedDict, total=False):
   """
     Shared state passed between every node in the RecoverX recovery graph.
     Each node receives the current state and returns a partial dict of

@@ -7,7 +7,7 @@ from app.models.diagnosis import Diagnosis
 
 load_dotenv()
 
-MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
+MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
 
 
 def _get_client() -> genai.Client:
