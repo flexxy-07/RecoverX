@@ -24,6 +24,10 @@ During Razorpay test-mode experimentation we observed:
 documented to classify as `root_cause=unknown`, `confidence=0.35` — the system reports honest
 uncertainty rather than guessing.
 
+## Taxonomy Ambiguity
+
+`authentication_failure` and `customer_action_required` have inherent definitional overlap for OTP/CVV-type failures (both require the customer to take an action to resolve). The LLM may classify an OTP failure as either. This is functionally harmless because the policy table maps both of these root causes to the exact same customer-notification outcome downstream, so the ambiguity does not affect system behavior.
+
 ## Setup (Windows)
 
 \`\`\`powershell

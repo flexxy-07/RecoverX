@@ -4,3 +4,4 @@ __pycache__/
 .env
 .vscode/
 pyrefly.toml
+firebase_credentials.json
