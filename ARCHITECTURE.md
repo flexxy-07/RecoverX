@@ -4,26 +4,7 @@ Living document. Last updated: 2026-09-05 (final submission state).
 
 ## Graph Flow
 
-```
-Failed Razorpay Transaction
-   ↓
-ingest → classify (LLM) → decide → guardrails
-                                           ↓
-                              ┌─────────────────────────────┐
-                              │ BLOCKED → audit → END       │
-                              └─────────────────────────────┘
-                                           ↓ ALLOWED
-                                  (retry / retry_later only)
-                              order_status_check (Razorpay API)
-                                           ↓
-                              ┌─────────────────────────────┐
-                              │ paid/captured → audit → END │
-                              └─────────────────────────────┘
-                                           ↓ unpaid / unknown
-                                        execute
-                                           ↓
-                              audit → Firestore → Dashboard
-```
+![RecoverX Architecture](architecture.png)
 
 ## Nodes
 

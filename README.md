@@ -15,25 +15,7 @@ directly chooses or executes a money-affecting action.**
 
 ## Architecture
 
-```
-Failed Razorpay Transaction
-   ↓
-ingest → classify (LLM) → decide → guardrails
-                                           ↓
-                              ┌────────────────────────┐
-                              │ BLOCKED → audit → END  │
-                              └────────────────────────┘
-                                           ↓ ALLOWED
-                              order_status_check (Razorpay API)
-                                           ↓
-                              ┌────────────────────────┐
-                              │ paid/captured → audit  │
-                              └────────────────────────┘
-                                           ↓ unpaid
-                                        execute
-                                           ↓
-                                         audit → Firestore → Dashboard
-```
+![RecoverX Architecture](architecture.png)
 
 | Node | What it does |
 |---|---|
