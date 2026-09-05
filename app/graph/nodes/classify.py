@@ -1,7 +1,10 @@
 import os
+import warnings
 from datetime import datetime, timezone
 from dotenv import load_dotenv
 from google import genai
+
+warnings.filterwarnings("ignore", message=".*automatic function calling.*")
 
 from app.graph.state import RecoveryState
 from app.models.diagnosis import Diagnosis
