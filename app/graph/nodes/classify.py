@@ -60,7 +60,7 @@ CRITICAL RULES:
 
 def _build_payload(transaction: dict) -> dict:
     """
-    Extracts ONLY the fields Gemini needs to diagnose the failure. Deliberately exludes customer_email, transaction id, and any other field not explicitly required for diagnosis. This is what we actually enforces the "no unnecessary PII" rule, not just a policy in prose.
+    Extracts ONLY the fields LLM needs to diagnose the failure. Deliberately exludes customer_email, transaction id, and any other field not explicitly required for diagnosis. This is what we actually enforces the "no unnecessary PII" rule, not just a policy in prose.
     """
     return {
         "amount": transaction.get("amount"),
@@ -75,7 +75,7 @@ def _build_payload(transaction: dict) -> dict:
 
 def _call_gemini(transaction: dict) -> Diagnosis:
     """
-    The actual Gemini call. Allowed to raise - classify() below is responsible for catching failures. kept separate from classify() so tests can monkeypatch this specific function and still exercise classify()'s REAL try/except fallback logic, not a test stand-in.
+    The actual LLM call. Allowed to raise - classify() below is responsible for catching failures. kept separate from classify() so tests can monkeypatch this specific function and still exercise classify()'s REAL try/except fallback logic, not a test stand-in.
     """
     
     payload = _build_payload(transaction)
@@ -93,7 +93,7 @@ def _call_gemini(transaction: dict) -> Diagnosis:
         },
     )
     # response.parsed is already a validated Diagnosis instance when
-    # response_schema is a Pydantic model. If Gemini's output doesn't
+    # response_schema is a Pydantic model. If LLM's output doesn't
     # match the schema, the SDK/Pydantic raises here rather than
     # returning a broken object — that failure propagates up to
     # classify()'s except block below.
@@ -129,7 +129,7 @@ def classify(state: RecoveryState) -> dict:
         # itself should never fail — but if it somehow did, we'd rather
         # know than crash silently. Print here as a last-resort signal,
         # separate from the audit trail (which depends on this succeeding).
-        print(f"[classify] Gemini call failed: {e}")
+        print(f"[classify] LLM call failed: {e}")
 
         fallback = Diagnosis(
             root_cause="unknown",

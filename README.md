@@ -1,52 +1,88 @@
-# RecoverX — AI-Powered Payment Revenue Recovery Agent
+# RecoverX — AI-Powered Payment Recovery Agent
 
-Razorpay AI Buildathon 2026. FastAPI + LangGraph + React + Firebase.
+Razorpay AI Buildathon 2026. LangGraph + LLM + React + Firestore.
 
 ## What it does
 
-Takes a failed Razorpay payment, diagnoses the likely root cause, decides a bounded
-recovery action, checks safety guardrails, verifies the current order state, executes
-only an approved action, and records a complete audit trail.
+Takes a failed Razorpay payment and runs it through a 7-node autonomous recovery graph:
+diagnoses the root cause with LLM, applies a deterministic policy to pick a recovery
+action, enforces safety guardrails, verifies current order state via the Razorpay API,
+executes the action (real Payment Links in test mode), and writes a full timestamped audit
+trail to Firestore for the dashboard.
 
-**LLM diagnoses. Deterministic code decides. Guardrails authorize. Execution performs.
-Audit records everything.** The LLM never directly chooses or executes a money-affecting
-action.
+**The LLM diagnoses. Deterministic code decides. Guardrails authorize. The LLM never
+directly chooses or executes a money-affecting action.**
 
 ## Architecture
 
-1. **Ingest**: Receives a failed transaction.
-2. **Classify (AI)**: Uses Gemini to analyze the Razorpay error payload and determine the root cause (with a confidence score).
-3. **Decide**: Deterministically maps the root cause to a proposed policy action (e.g., `retry`, `customer_nudge`, `human_review`). Overrides actions to `human_review` if confidence is low.
-4. **Guardrails**: Applies strict safety checks (e.g., blocks if max retries exceeded or fraud risk detected).
-5. **Order Status Check**: For money-moving actions, verifies the order is actually unpaid via the Razorpay API before proceeding.
-6. **Execute**: Performs the final action (e.g., generating a Razorpay Payment Link for a retry).
-7. **Audit**: Appends a complete, time-stamped execution timeline and result to Firestore for the dashboard.
+```
+Failed Razorpay Transaction
+   ↓
+ingest → classify (LLM) → decide → guardrails
+                                           ↓
+                              ┌────────────────────────┐
+                              │ BLOCKED → audit → END  │
+                              └────────────────────────┘
+                                           ↓ ALLOWED
+                              order_status_check (Razorpay API)
+                                           ↓
+                              ┌────────────────────────┐
+                              │ paid/captured → audit  │
+                              └────────────────────────┘
+                                           ↓ unpaid
+                                        execute
+                                           ↓
+                                         audit → Firestore → Dashboard
+```
 
-## Known Limitations
+| Node | What it does |
+|---|---|
+| `ingest` | Normalises the incoming failed-transaction dict into `RecoveryState` |
+| `classify` | Calls LLM with the Razorpay error payload; returns `Diagnosis(root_cause, confidence, explanation)`. Falls back to `unknown / 0.0` if LLM fails. |
+| `decide` | Deterministic policy table: root_cause → action. Overrides to `human_review` if `confidence < 0.6`. |
+| `guardrails` | Hard-blocks `payment_risk` transactions and transactions exceeding the retry cap. |
+| `order_status_check` | Live Razorpay order fetch — only runs for `retry` / `retry_later`. If order is `paid` or `captured`, routes to `audit` (no execution). |
+| `execute` | Creates a Razorpay Payment Link for retries; logs nudge/review flags for other actions. |
+| `audit` | Writes the full `audit_trail` + all state fields to Firestore (`recovery_runs/{transaction_id}`). |
 
-**Execution Idempotency**: Execution idempotency (preventing duplicate Payment Links on a re-run of the same recovery attempt) is not yet implemented — order-status verification prevents double-charging the customer, but a workflow re-run could currently create a second unused Payment Link for the same failure.
+## Running it
 
-## Honest-uncertainty example
-
-During Razorpay test-mode experimentation we observed:
-`error_code=BAD_REQUEST_ERROR`, `error_source=gateway`, `error_step=payment_authorization`,
-`error_reason=payment_failed`. This does not prove a specific underlying root cause, so it's
-documented to classify as `root_cause=unknown`, `confidence=0.35` — the system reports honest
-uncertainty rather than guessing.
-
-## Taxonomy Ambiguity
-
-`authentication_failure` and `customer_action_required` have inherent definitional overlap for OTP/CVV-type failures (both require the customer to take an action to resolve). The LLM may classify an OTP failure as either. This is functionally harmless because the policy table maps both of these root causes to the exact same customer-notification outcome downstream, so the ambiguity does not affect system behavior.
-
-## Setup & Deployment
-
-**Backend (Local Batch Run)**:
+**Backend (batch mode):**
 ```powershell
 python -m venv venv
 venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-python batch_run.py
+python batch_run.py        # processes data/transactions.json → Firestore
 ```
 
-**Frontend (Dashboard)**:
-Run locally with `npm run dev` in the `frontend/` directory. (Designed for Vercel deployment).
+
+**Frontend dashboard:**
+```powershell
+cd frontend
+npm install
+npm run dev        
+```
+
+## Known Limitations
+
+**Execution Idempotency**: A re-run of the same recovery attempt (same `transaction_id`) can
+create a second, unused Razorpay Payment Link. The order-status check prevents the customer
+from being double-*charged* (it won't re-execute if the order is already paid), but a
+redundant link is still generated. Fix: check Firestore for an existing
+`execution_result.payment_link_id` before calling the Payment Links API. Not shipped due
+to deadline constraints; identified and documented via a live test
+(`test_idempo.py`).
+
+
+
+**Notification infrastructure**: `customer_nudge` and `customer_action` execution steps
+log intent only — there is no email/SMS/webhook sending built. The payment link exists; delivery
+is a notification-infra concern outside the scope of this buildathon.
+
+## Honest-uncertainty examples
+
+- `BAD_REQUEST_ERROR / gateway / payment_failed` with no further signal: classified as
+  `root_cause=unknown, confidence=0.35` — the system reports honest uncertainty rather than guessing.
+
+- `authentication_failure` and `customer_action_required` overlap for OTP/CVV failures.
+  Functionally harmless: both map to the same policy action (`customer_nudge`). See DECISIONS.md.

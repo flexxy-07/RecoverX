@@ -6,7 +6,7 @@ class Diagnosis(BaseModel):
     """
     The output contract for the classify node. This is the ONLY thing
     classify is allowed to produce — whether it's the current hardcoded
-    fake version or a real Gemini call later. Pydantic validation means
+    fake version or a real LLM call later. Pydantic validation means
     a malformed or out-of-scope value raises an error at creation time,
     not somewhere downstream in decide/guardrails/execute.
     """

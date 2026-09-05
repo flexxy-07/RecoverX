@@ -1,66 +1,86 @@
 # ARCHITECTURE.md
 
-Living document. Updated whenever the architecture changes.
+Living document. Last updated: 2026-09-05 (final submission state).
 
-## Flow
+## Graph Flow
 
-\`\`\`
-Razorpay
+```
+Failed Razorpay Transaction
    ↓
-FastAPI
-   ↓
-LangGraph Recovery Workflow
-   ↓
-ingest → classify → decide → guardrails → order_status_check
-   ↓
-conditional routing
- ├── already resolved → audit → END
- └── unpaid → execute → audit → END
-   ↓
-Firestore (later)
-\`\`\`
+ingest → classify (LLM) → decide → guardrails
+                                           ↓
+                              ┌─────────────────────────────┐
+                              │ BLOCKED → audit → END       │
+                              └─────────────────────────────┘
+                                           ↓ ALLOWED
+                                  (retry / retry_later only)
+                              order_status_check (Razorpay API)
+                                           ↓
+                              ┌─────────────────────────────┐
+                              │ paid/captured → audit → END │
+                              └─────────────────────────────┘
+                                           ↓ unpaid / unknown
+                                        execute
+                                           ↓
+                              audit → Firestore → Dashboard
+```
 
 ## Nodes
 
 | Node | Responsibility |
 |---|---|
-| `ingest` | Load/normalize the incoming failed-transaction record into state |
-| `classify` | Diagnose root cause (fake for now; Gemini later) — never crashes the graph |
-| `decide` | Deterministic policy lookup + confidence gate → `proposed_action` |
-| `guardrails` | Hard-block unsafe actions (`payment_risk`, retry cap) → `guardrail_result` |
-| `order_status_check` | Double-charge protection — checks live order state → `order_status` |
-| `execute` | Fake execution of the approved action |
-| `audit` | Print/record the accumulated audit trail |
+| `ingest` | Load/normalize the incoming failed-transaction record into `RecoveryState` |
+| `classify` | Call LLM with the Razorpay error payload → `Diagnosis(root_cause, confidence, explanation)`. Never crashes the graph — 503s and parse errors fall back to `unknown / 0.0`. |
+| `decide` | Deterministic policy table: `root_cause → proposed_action`. Overrides action to `human_review` if `confidence < 0.6` regardless of policy table. |
+| `guardrails` | Hard-blocks `payment_risk` and transactions exceeding `MAX_RETRIES`. Sets `guardrail_result` to `BLOCKED` or `ALLOWED`. |
+| `order_status_check` | Only runs for `retry` / `retry_later` (MONEY_MOVING_ACTIONS). Fetches live Razorpay order status — if `paid` or `captured`, routes to `audit` without executing (double-charge protection). |
+| `execute` | Creates a Razorpay Payment Link for retries; logs flags for nudge/review actions. Real Razorpay API calls in test mode. |
+| `audit` | Writes all state fields + `audit_trail` (list of per-node timestamped events) to Firestore at `recovery_runs/{transaction_id}` with `.set()` (overwrite semantics). |
 
-## Two independent routers
+## Two Independent Routers
 
-- `guardrail_router` reads `guardrail_result` only.
-- `order_status_router` reads `order_status` only.
+- **`guardrail_router`**: reads `guardrail_result` + `proposed_action`. Routes to `audit` if BLOCKED; to `order_status_check` for money-moving actions; straight to `execute` for everything else.
+- **`order_status_router`**: reads `order_status` only. Routes to `audit` if already paid; to `execute` if unpaid/uncertain.
 
-They are kept separate on purpose: guardrails answer "is this action *safe* to attempt at
-all" (root cause / retry count), while order-status answers "has reality already changed
-underneath us" (double-charge protection). Conflating them into one router would hide which
-of two independent failure modes triggered a block.
+They are kept separate on purpose: guardrails answer *"is this action safe to attempt at all?"* (root-cause / retry-count domain), while order-status answers *"has reality already changed underneath us?"* (double-charge domain). Conflating them would obscure which failure mode triggered a block in the audit trail.
 
-## State shape
+Note: `guardrail_router` reads two fields (not just one) because LangGraph only allows one set of conditional edges per node — a third router is not possible here. See DECISIONS.md.
 
-`RecoveryState` (TypedDict) — see `app/graph/state.py`. Key design point:
-`audit_events: Annotated[list, operator.add]` so audit events accumulate across nodes instead
-of each node's return value overwriting the previous one (LangGraph's default merge behavior
-for a plain list key is overwrite, not append).
+## State Shape
 
-## Not yet built
+`RecoveryState` (TypedDict, `total=False`) — see [`app/graph/state.py`](app/graph/state.py).
 
-Gemini integration, Razorpay integration, Firestore, Flutter, real execution, dashboard,
-production auth.
+Key design point: `audit_events: Annotated[list, operator.add]` — LangGraph's default merge
+for a plain `list` key is overwrite (last writer wins). The `operator.add` annotation tells
+LangGraph to concatenate instead, so every node's returned `audit_events` list is appended
+to the existing one. Without this, only the last node to touch `audit_events` would survive.
 
+## Classify: Late-Binding Wrapper
 
-## Implementation note: classify is registered via a late-binding wrapper
+`graph.py` does **not** do `from app.graph.nodes.classify import classify`. It imports the
+module (`import app.graph.nodes.classify as classify_module`) and wraps the call in a lambda
+that looks up `classify_module.classify` at call time. This allows tests to monkeypatch
+`classify_module.classify` after import (e.g. `demo_double_charge.py`) and have the swap
+actually take effect. A direct function reference captured at import time would be immune to
+reassignment. See DECISIONS.md for full rationale.
 
-`graph.py` does NOT do `from app.graph.nodes.classify import classify`. It imports the
-module and wraps the call in a lambda that looks up `classify_module.classify` at call
-time, not at import time. This is required for tests to be able to swap in different fake
-diagnosis behavior per scenario (see run_test.py). See DECISIONS.md for the full story.
+## Firestore Schema
 
+Collection: `recovery_runs`. Document ID: `transaction_id` (overwrite on re-run).
 
-guardrail_router now also checks proposed_action for the money-moving-actions filter, so a future reader doesn't have to rediscover this from the code alone.
+Each document contains:
+```
+transaction_id, batch_run_id, timestamp,
+diagnosis: { root_cause, confidence, explanation },
+proposed_action, guardrail_result, order_status,
+execution_result: { action, status, payment_link_id?, short_url?, error?, note? },
+outcome,
+audit_trail: [ { node, event, timestamp, ...node-specific fields } ]
+```
+
+## Dashboard
+
+React + Vite + TailwindCSS. Reads `recovery_runs` collection from Firestore on load.
+Clickable rows open a slide-in Evidence Panel with: AI diagnosis + confidence bar,
+policy decision + guardrail result, order status, execution result with a clickable
+recovery URL, and a full step timeline with per-node wall-clock timestamps.

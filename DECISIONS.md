@@ -25,7 +25,7 @@ Not a scope change, just flagged per working-style rules — happy to revert if 
 
 ## Deferred decisions
 
-- Gemini prompt design and structured-output schema — later phase.
+- LLM prompt design and structured-output schema — later phase.
 - Razorpay order-status API integration shape — later phase.
 - Firestore schema for audit persistence — later phase.
 
@@ -90,14 +90,14 @@ Confirmed live: 6 payment links created with real `rzp.io` short URLs during the
 
 ## 2026-09-04 — authentication_failure and customer_action_required converge on the same action
 
-Batch run finding: Gemini classified 4 out of 5 OTP/CVV/3DS failure transactions as
+Batch run finding: LLM classified 4 out of 5 OTP/CVV/3DS failure transactions as
 `customer_action_required` rather than `authentication_failure`. Both are valid
 interpretations — an OTP failure does require the customer to re-authenticate, which
 is a customer action. The distinction is semantic, not operational.
 
 Crucially, both root causes map to the same action path in the policy table
 (`customer_nudge` / `customer_action`), so misclassification between these two is
-functionally harmless. The audit trail still records the exact diagnosis Gemini returned,
+functionally harmless. The audit trail still records the exact diagnosis LLM returned,
 so the data is never lost — only the label differs.
 
 No change to policy table or prompt. Noted here so future reviewers understand why
@@ -135,8 +135,66 @@ stable by the time the dashboard is written.
 
 ## 2026-09-04 — batch_run.py sleep bumped from 1s to 2s (18 RPM → demo-safe)
 
-Gemini free tier: 1,500 requests/day, 30 requests/minute.
+LLM free tier: 1,500 requests/day, 30 requests/minute.
 At `time.sleep(1)`, 35 transactions ≈ 35 RPM — above the rate limit if any retry or
 network jitter adds latency. At `time.sleep(2)`, 35 transactions ≈ 18 RPM — comfortably
 inside the limit with a ~40% safety margin. Cost: 35 extra seconds per batch run.
-
+
+## 2026-09-04 — Per-event timestamps added to every audit node
+
+All 5 graph nodes (`ingest`, `classify`, `decide`, `guardrails`, `order_status_check`,
+`execute`) now emit `"timestamp": datetime.now(timezone.utc).isoformat()` on every audit
+event they append to `audit_events`. This is set at event-creation time (not at the
+document level) so the dashboard Evidence Panel can show a genuine wall-clock step
+timeline rather than a static list. The helper `_now()` is a one-liner in each node
+module to keep the timestamp format consistent.
+
+## 2026-09-04 — LLM 503 mid-batch: fallback confirmed correct, root cause noted
+
+A live 35-transaction batch run hit LLM 503 UNAVAILABLE on 23/35 calls. Zero graph
+crashes — every 503 was caught by the classify node's exception handler and fell back
+to `Diagnosis(root_cause="unknown", confidence=0.0, explanation="...")`. The decide
+node's confidence gate then correctly routed all 23 to `human_review`.
+
+The batch Firestore output showed 23 `human_review` / `unknown` rows instead of the
+expected mix. This is correct behavior but misleading for a demo dataset. Not a bug —
+documented here so a re-run at a lower request rate (or on a paid tier) produces the
+expected distribution of root causes.
+
+## 2026-09-05 — Execution idempotency gap: identified, documented, not fixed
+
+A live test (`test_idempo.py`) confirmed that invoking the graph twice for the same
+`transaction_id` creates two distinct Razorpay Payment Links:
+
+```
+Run 1 payment_link_id: plink_TYDX4FUNUNxSbj
+Run 2 payment_link_id: plink_TYDX7kTwo6BzqW
+FAIL — created a second Payment Link
+```
+
+The order-status check prevents the customer from being double-*charged* (it won't
+re-execute if the order is already `paid`/`captured`), but a redundant link is created
+before that check is triggered on a fresh re-run.
+
+Decision: **do not fix before submission**. The fix (one Firestore pre-read in
+`_execute_retry` to check for an existing `payment_link_id`) is small but untested on
+deadline day. An honest documented gap is safer than an untested last-minute patch.
+The fix path is clear; the risk of shipping it blind is not worth it.
+
+## 2026-09-05 — Demo scripts use Rich for terminal output
+
+`demo_display.py` provides shared `print_scenario_header`, `print_audit_trail`, and
+`print_final_result` helpers using the `rich` library. This was chosen over print
+statements for the pitch video so the terminal output is legible on screen without
+zooming. The Rich dependency is already present in `requirements.txt`.
+
+`demo_golden_scenarios.py` runs 3 real transactions from `data/transactions.json` plus
+one hardcoded ambiguous transaction for the "honest uncertainty" scenario. Scenario 4
+uses a hardcoded transaction instead of `txn_001` from the dataset because `txn_001`'s
+LLM diagnosis was not reliably reproducible across runs (sometimes `unknown`, sometimes
+classified).
+
+`demo_double_charge.py` uses `unittest.mock.patch` to force a `gateway_transient`
+diagnosis and bypass LLM, so the demo is reproducible and focused on the
+order-status-check behavior (the live Razorpay call) rather than the AI classification.
+

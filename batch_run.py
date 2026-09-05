@@ -116,7 +116,7 @@ print("Outcomes:")
 for outcome, count in sorted(outcomes.items(), key=lambda x: -x[1]):
     print(f"  {outcome:<28} {count}")
 print()
-print("Root causes (Gemini diagnoses):")
+print("Root causes (LLM diagnoses):")
 for cause, count in sorted(root_causes.items(), key=lambda x: -x[1]):
     print(f"  {cause:<28} {count}")
 
