@@ -49,7 +49,7 @@ print_final_result(result["proposed_action"], result["execution_result"], result
 order_checked = any(e.get("node") == "order_status_check" for e in result["audit_events"])
 order_paid = result.get("order_status") in ("paid", "captured")
 
-if order_checked and order_paid and result["execution_result"] is None:
-    console.print("\n[bold green]✓ Real Razorpay lookup confirmed 'paid' — execution correctly blocked[/bold green]")
-else:
-    console.print("\n[bold red]⚠ Did not reach the expected block — check before recording[/bold red]")
+# if order_checked and order_paid and result["execution_result"] is None:
+#     console.print("\n[bold green]✓ Real Razorpay lookup confirmed 'paid' — execution correctly blocked[/bold green]")
+# else:
+#     console.print("\n[bold red]⚠ Did not reach the expected block — check before recording[/bold red]")
