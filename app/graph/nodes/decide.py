@@ -1,4 +1,9 @@
+from datetime import datetime, timezone
 from app.graph.state import RecoveryState
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 # Deterministic policy table. This is NEVER modified by the LLM — classify
 # only ever sets root_cause; this mapping is fixed, auditable, ordinary
@@ -26,7 +31,9 @@ def decide(state: RecoveryState) -> dict:
     its root_cause looks in the table.
     """
     diagnosis = state["diagnosis"]
+    # pyrefly: ignore [unsupported-operation]
     root_cause = diagnosis["root_cause"]
+    # pyrefly: ignore [unsupported-operation]
     confidence = diagnosis["confidence"]
 
     policy_action = POLICY[root_cause]
@@ -46,6 +53,7 @@ def decide(state: RecoveryState) -> dict:
                 f"{CONFIDENCE_THRESHOLD}; forcing human_review "
                 f"regardless of policy table."
             ),
+            "timestamp": _now(),
         })
     else:
         action = policy_action
@@ -55,6 +63,7 @@ def decide(state: RecoveryState) -> dict:
             "root_cause": root_cause,
             "confidence": confidence,
             "final_action": action,
+            "timestamp": _now(),
         })
 
     return {

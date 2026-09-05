@@ -1,4 +1,5 @@
 import os
+from datetime import datetime, timezone
 from dotenv import load_dotenv
 from google import genai
 
@@ -6,6 +7,10 @@ from app.graph.state import RecoveryState
 from app.models.diagnosis import Diagnosis
 
 load_dotenv()
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
 
@@ -114,6 +119,7 @@ def classify(state: RecoveryState) -> dict:
                     "event": "diagnosis_completed",
                     "root_cause": diagnosis.root_cause,
                     "confidence": diagnosis.confidence,
+                    "timestamp": _now(),
                 }
             ],
         }
@@ -138,6 +144,7 @@ def classify(state: RecoveryState) -> dict:
                     "node": "classify",
                     "event": "diagnosis_failed",
                     "error": str(e),
+                    "timestamp": _now(),
                 }
             ],
         }

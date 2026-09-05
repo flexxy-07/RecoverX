@@ -1,4 +1,9 @@
+from datetime import datetime, timezone
 from app.graph.state import RecoveryState
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 def ingest(state: RecoveryState) -> dict:
@@ -21,6 +26,7 @@ def ingest(state: RecoveryState) -> dict:
                 "node": "ingest",
                 "event": "transaction_received",
                 "transaction_id": transaction.get("id", "unknown"),
+                "timestamp": _now(),
             }
         ],
-    }
+    }

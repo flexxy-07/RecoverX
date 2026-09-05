@@ -1,6 +1,7 @@
 # app/graph/nodes/execute.py
 
 import os
+from datetime import datetime, timezone
 import requests
 from requests.auth import HTTPBasicAuth
 from dotenv import load_dotenv
@@ -8,6 +9,10 @@ from dotenv import load_dotenv
 from app.graph.state import RecoveryState
 
 load_dotenv()
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 RAZORPAY_BASE = "https://api.razorpay.com/v1"
@@ -165,6 +170,7 @@ def execute(state: RecoveryState) -> dict:
                 "event": "executed",
                 "action": action,
                 "result": result,
+                "timestamp": _now(),
             }
         ],
     }

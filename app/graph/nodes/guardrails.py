@@ -1,6 +1,11 @@
+from datetime import datetime, timezone
 from app.graph.state import RecoveryState
 
 MAX_RETRIES = 3
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 def guardrails(state: RecoveryState) -> dict:
@@ -26,6 +31,7 @@ def guardrails(state: RecoveryState) -> dict:
             "node": "guardrails",
             "event": "blocked",
             "reason": "root_cause is payment_risk; never auto-actioned.",
+            "timestamp": _now(),
         })
 
     elif retry_count >= MAX_RETRIES:
@@ -37,6 +43,7 @@ def guardrails(state: RecoveryState) -> dict:
                 f"retry_count ({retry_count}) has reached the max "
                 f"of {MAX_RETRIES}."
             ),
+            "timestamp": _now(),
         })
 
     else:
@@ -46,6 +53,7 @@ def guardrails(state: RecoveryState) -> dict:
             "event": "allowed",
             "root_cause": root_cause,
             "retry_count": retry_count,
+            "timestamp": _now(),
         })
 
     return {

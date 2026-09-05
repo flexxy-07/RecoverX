@@ -1,22 +1,274 @@
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { collection, getDocs, query } from 'firebase/firestore';
 import { db } from './lib/firebase';
-import { Activity, AlertTriangle, CheckCircle2, Info, ShieldAlert, UserCog, X, Terminal } from 'lucide-react';
+import {
+  Activity,
+  AlertTriangle,
+  CheckCircle2,
+  Info,
+  ShieldAlert,
+  UserCog,
+  X,
+  Terminal,
+  ChevronDown,
+  ChevronUp,
+  Brain,
+  Shield,
+  Zap,
+  GitBranch,
+  Clock,
+} from 'lucide-react';
+
+interface AuditEvent {
+  node: string;
+  event: string;
+  timestamp?: string;
+  [key: string]: any;
+}
 
 interface TransactionRecord {
   transaction_id: string;
   batch_run_id?: string;
-  timestamp: string;
+  timestamp: any;
   outcome: string;
   guardrail_result: string;
   proposed_action: string;
+  order_status?: string;
   diagnosis: {
     root_cause: string;
     confidence: number;
     explanation: string;
   };
-  audit_trail: any[];
+  execution_result?: {
+    action: string;
+    status: string;
+    payment_link_id?: string;
+    short_url?: string;
+    error?: string;
+    note?: string;
+  };
+  audit_trail: AuditEvent[];
 }
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+const NODE_ICONS: Record<string, React.ReactNode> = {
+  ingest: <GitBranch className="w-3.5 h-3.5" />,
+  classify: <Brain className="w-3.5 h-3.5" />,
+  decide: <Zap className="w-3.5 h-3.5" />,
+  guardrails: <Shield className="w-3.5 h-3.5" />,
+  order_status_check: <CheckCircle2 className="w-3.5 h-3.5" />,
+  execute: <Activity className="w-3.5 h-3.5" />,
+};
+
+function getStatusBadge(outcome: string) {
+  const base = "inline-flex items-center gap-1.5 px-2 py-0.5 rounded-sm text-xs font-semibold tracking-wide uppercase border";
+  switch (outcome) {
+    case 'recovery_link_created':
+      return <span className={`${base} bg-emerald-500/10 text-emerald-400 border-emerald-500/20`}><CheckCircle2 className="w-3 h-3" /> Recovered</span>;
+    case 'retry_scheduled':
+      return <span className={`${base} bg-blue-500/10 text-blue-400 border-blue-500/20`}><Activity className="w-3 h-3" /> Scheduled</span>;
+    case 'customer_notified':
+      return <span className={`${base} bg-blue-500/10 text-blue-400 border-blue-500/20`}><Info className="w-3 h-3" /> Notified</span>;
+    case 'human_review':
+    case 'recovery_link_failed':
+      return <span className={`${base} bg-amber-500/10 text-amber-400 border-amber-500/20`}><UserCog className="w-3 h-3" /> Review</span>;
+    case 'blocked':
+      return <span className={`${base} bg-red-500/10 text-red-400 border-red-500/20`}><ShieldAlert className="w-3 h-3" /> Blocked</span>;
+    default:
+      return <span className={`${base} bg-zinc-800 text-zinc-400 border-zinc-700`}><AlertTriangle className="w-3 h-3" /> {outcome}</span>;
+  }
+}
+
+function ConfidenceBar({ value }: { value: number }) {
+  const pct = Math.round(value * 100);
+  const color = pct >= 90 ? 'bg-emerald-500' : pct >= 60 ? 'bg-amber-500' : 'bg-red-500';
+  return (
+    <div className="flex items-center gap-2">
+      <div className="w-16 h-1 bg-zinc-800 rounded-full overflow-hidden">
+        <div className={`h-full ${color}`} style={{ width: `${pct}%` }} />
+      </div>
+      <span className="text-xs font-mono text-zinc-400">{value.toFixed(2)}</span>
+    </div>
+  );
+}
+
+function EvidencePanel({ record, onClose }: { record: TransactionRecord; onClose: () => void }) {
+  const diagnosis = (record.diagnosis || {}) as TransactionRecord['diagnosis'];
+  const execution = (record.execution_result || {}) as NonNullable<TransactionRecord['execution_result']>;
+
+  return (
+    <div className="fixed inset-0 z-50 flex bg-black/75" onClick={onClose}>
+      <div
+        className="ml-auto w-full max-w-xl h-full bg-zinc-950 border-l border-zinc-800 overflow-y-auto flex flex-col"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="sticky top-0 z-10 flex items-center justify-between px-6 py-4 bg-zinc-950 border-b border-zinc-800">
+          <div>
+            <h3 className="text-sm font-bold uppercase tracking-widest text-zinc-100">Evidence Panel</h3>
+            <p className="text-xs font-mono text-zinc-500 mt-0.5">{record.transaction_id}</p>
+          </div>
+          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-100 transition-colors p-1.5 hover:bg-zinc-800 rounded">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="flex-1 p-6 space-y-6">
+
+          {/* Outcome Banner */}
+          <div className="flex items-center justify-between p-4 bg-zinc-900 border border-zinc-800 rounded-sm">
+            <span className="text-xs text-zinc-500 uppercase tracking-wider font-semibold">Final Outcome</span>
+            {getStatusBadge(record.outcome)}
+          </div>
+
+          {/* Section 1 — Diagnosis */}
+          <section>
+            <div className="flex items-center gap-2 mb-3">
+              <Brain className="w-3.5 h-3.5 text-blue-400" />
+              <h4 className="text-xs font-bold uppercase tracking-widest text-zinc-400">AI Diagnosis</h4>
+            </div>
+            <div className="bg-zinc-900 border border-zinc-800 rounded-sm p-4 space-y-3">
+              <div className="flex justify-between items-start">
+                <div>
+                  <p className="text-xs text-zinc-500 mb-1">Root Cause</p>
+                  <p className="text-sm font-semibold text-zinc-100">{diagnosis.root_cause}</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-xs text-zinc-500 mb-1">Confidence</p>
+                  <ConfidenceBar value={diagnosis.confidence || 0} />
+                </div>
+              </div>
+              {diagnosis.explanation && (
+                <div>
+                  <p className="text-xs text-zinc-500 mb-1">Reasoning</p>
+                  <p className="text-sm text-zinc-300 leading-relaxed">{diagnosis.explanation}</p>
+                </div>
+              )}
+            </div>
+          </section>
+
+          {/* Section 2 — Policy Decision */}
+          <section>
+            <div className="flex items-center gap-2 mb-3">
+              <Zap className="w-3.5 h-3.5 text-amber-400" />
+              <h4 className="text-xs font-bold uppercase tracking-widest text-zinc-400">Policy Decision</h4>
+            </div>
+            <div className="bg-zinc-900 border border-zinc-800 rounded-sm p-4">
+              <div className="flex justify-between items-center">
+                <div>
+                  <p className="text-xs text-zinc-500 mb-1">Proposed Action</p>
+                  <p className="text-sm font-mono font-semibold text-zinc-100">{record.proposed_action || 'N/A'}</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-xs text-zinc-500 mb-1">Guardrail</p>
+                  <span className={`text-xs font-bold uppercase tracking-wider ${record.guardrail_result === 'BLOCKED' ? 'text-red-400' : 'text-emerald-400'}`}>
+                    {record.guardrail_result || 'N/A'}
+                  </span>
+                </div>
+              </div>
+              {record.order_status && (
+                <div className="mt-3 pt-3 border-t border-zinc-800">
+                  <p className="text-xs text-zinc-500 mb-1">Order Status at Execution</p>
+                  <p className="text-sm font-mono text-zinc-100">{record.order_status}</p>
+                </div>
+              )}
+            </div>
+          </section>
+
+          {/* Section 3 — Execution Result */}
+          <section>
+            <div className="flex items-center gap-2 mb-3">
+              <Activity className="w-3.5 h-3.5 text-emerald-400" />
+              <h4 className="text-xs font-bold uppercase tracking-widest text-zinc-400">Execution Result</h4>
+            </div>
+            <div className="bg-zinc-900 border border-zinc-800 rounded-sm p-4 space-y-2">
+              <div className="flex justify-between">
+                <p className="text-xs text-zinc-500">Status</p>
+                <p className="text-xs font-mono text-zinc-100">{execution.status || 'N/A'}</p>
+              </div>
+              {execution.short_url && (
+                <div className="flex justify-between items-center">
+                  <p className="text-xs text-zinc-500">Recovery URL</p>
+                  <a href={execution.short_url} target="_blank" rel="noopener noreferrer"
+                    className="text-xs font-mono text-blue-400 hover:text-blue-300 underline underline-offset-2 truncate max-w-[200px]">
+                    {execution.short_url}
+                  </a>
+                </div>
+              )}
+              {execution.error && (
+                <div className="mt-2 p-3 bg-red-950/30 border border-red-900/40 rounded-sm">
+                  <p className="text-xs text-red-400 font-mono leading-relaxed">{execution.error}</p>
+                </div>
+              )}
+              {execution.note && (
+                <p className="text-xs text-zinc-500 italic">{execution.note}</p>
+              )}
+            </div>
+          </section>
+
+          {/* Section 4 — Audit Timeline */}
+          <section>
+            <div className="flex items-center gap-2 mb-3">
+              <Terminal className="w-3.5 h-3.5 text-zinc-400" />
+              <h4 className="text-xs font-bold uppercase tracking-widest text-zinc-400">Step Timeline</h4>
+            </div>
+            <div className="space-y-0">
+              {record.audit_trail?.map((step, idx) => (
+                <div key={idx} className="relative pl-6">
+                  {/* Timeline line */}
+                  {idx < record.audit_trail.length - 1 && (
+                    <div className="absolute left-[7px] top-5 bottom-0 w-px bg-zinc-800" />
+                  )}
+                  {/* Dot */}
+                  <div className="absolute left-[3px] top-[14px] w-2 h-2 rounded-full bg-zinc-700 border border-zinc-600" />
+
+                  <div className="py-3">
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <span className="text-zinc-400">{NODE_ICONS[step.node] || <Terminal className="w-3.5 h-3.5" />}</span>
+                      <span className="text-xs font-bold text-zinc-200 uppercase tracking-wide">{step.node}</span>
+                      <span className="text-xs text-zinc-600">/</span>
+                      <span className="text-xs text-zinc-500">{step.event}</span>
+                      {step.timestamp && (
+                        <span className="ml-auto text-xs font-mono text-zinc-600 flex items-center gap-1">
+                          <Clock className="w-3 h-3" />
+                          {new Date(step.timestamp).toLocaleTimeString()}
+                        </span>
+                      )}
+                    </div>
+                    {/* Key fields */}
+                    <div className="bg-zinc-900 border border-zinc-800 rounded-sm p-2.5 space-y-1 font-mono text-xs">
+                      {Object.entries(step)
+                        .filter(([k]) => !['node', 'event', 'timestamp', 'result'].includes(k))
+                        .map(([k, v]) => (
+                          <div key={k} className="flex gap-2">
+                            <span className="text-zinc-600 shrink-0">{k}:</span>
+                            <span className="text-zinc-300 break-all">{typeof v === 'object' ? JSON.stringify(v) : String(v)}</span>
+                          </div>
+                        ))}
+                      {step.result && (
+                        <div className="pt-1 mt-1 border-t border-zinc-800">
+                          {Object.entries(step.result).map(([k, v]) => (
+                            <div key={k} className="flex gap-2">
+                              <span className="text-zinc-600 shrink-0">result.{k}:</span>
+                              <span className="text-zinc-300 break-all">{String(v)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Main App ───────────────────────────────────────────────────────────────
 
 function App() {
   const [records, setRecords] = useState<TransactionRecord[]>([]);
@@ -27,27 +279,24 @@ function App() {
   useEffect(() => {
     const fetchRecords = async () => {
       try {
-        const q = query(collection(db, 'recovery_runs'));
-        const snapshot = await getDocs(q);
+        const snapshot = await getDocs(query(collection(db, 'recovery_runs')));
         const data = snapshot.docs.map(doc => doc.data() as TransactionRecord);
         data.sort((a, b) => a.transaction_id.localeCompare(b.transaction_id));
         setRecords(data);
       } catch (err: any) {
-        console.error("Error fetching records:", err);
-        setError(err.message || "Failed to load records from Firestore");
+        setError(err.message || "Failed to load records");
       } finally {
         setLoading(false);
       }
     };
-
     fetchRecords();
   }, []);
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-[#09090b]">
-        <div className="flex items-center gap-3 text-[#a1a1aa] font-mono text-sm tracking-tight">
-          <Activity className="animate-spin w-4 h-4 text-[#2563eb]" />
+      <div className="flex items-center justify-center min-h-screen bg-zinc-950">
+        <div className="flex items-center gap-3 text-zinc-500 font-mono text-sm tracking-tight">
+          <Activity className="animate-spin w-4 h-4 text-blue-500" />
           LOADING_RECOVERX_SYSTEM...
         </div>
       </div>
@@ -56,13 +305,9 @@ function App() {
 
   if (error) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-screen gap-4 bg-[#09090b] text-[#f4f4f5]">
-        <ShieldAlert className="w-12 h-12 text-[#ef4444]" />
-        <h2 className="text-xl font-bold tracking-tight">Connection Failed</h2>
-        <p className="text-[#a1a1aa] text-center max-w-md text-sm leading-relaxed">
-          {error}<br/><br/>
-          Check Firebase Web App config in <code className="bg-[#18181b] px-1.5 py-0.5 rounded border border-[#27272a] font-mono">.env</code>.
-        </p>
+      <div className="flex flex-col items-center justify-center min-h-screen gap-4 bg-zinc-950 text-zinc-100">
+        <ShieldAlert className="w-10 h-10 text-red-500" />
+        <p className="text-sm text-zinc-400 max-w-md text-center">{error}</p>
       </div>
     );
   }
@@ -73,159 +318,86 @@ function App() {
   const humanReview = records.filter(r => r.outcome === 'human_review' || r.outcome === 'recovery_link_failed').length;
   const blocked = records.filter(r => r.outcome === 'blocked').length;
 
-  const getStatusBadge = (outcome: string) => {
-    const baseClasses = "inline-flex items-center px-2 py-1 rounded-sm text-xs font-medium tracking-wide uppercase border";
-    switch (outcome) {
-      case 'recovery_link_created':
-        return <span className={`${baseClasses} bg-[#10b981]/10 text-[#10b981] border-[#10b981]/20`}><CheckCircle2 className="w-3 h-3 mr-1.5"/> Recovered</span>;
-      case 'retry_scheduled':
-        return <span className={`${baseClasses} bg-[#3b82f6]/10 text-[#3b82f6] border-[#3b82f6]/20`}><Activity className="w-3 h-3 mr-1.5"/> Scheduled</span>;
-      case 'customer_notified':
-        return <span className={`${baseClasses} bg-[#3b82f6]/10 text-[#3b82f6] border-[#3b82f6]/20`}><Info className="w-3 h-3 mr-1.5"/> Notified</span>;
-      case 'human_review':
-      case 'recovery_link_failed':
-        return <span className={`${baseClasses} bg-[#f59e0b]/10 text-[#f59e0b] border-[#f59e0b]/20`}><UserCog className="w-3 h-3 mr-1.5"/> Review</span>;
-      case 'blocked':
-        return <span className={`${baseClasses} bg-[#ef4444]/10 text-[#ef4444] border-[#ef4444]/20`}><ShieldAlert className="w-3 h-3 mr-1.5"/> Blocked</span>;
-      default:
-        return <span className={`${baseClasses} bg-[#27272a] text-[#a1a1aa] border-[#27272a]`}><AlertTriangle className="w-3 h-3 mr-1.5"/> {outcome}</span>;
-    }
-  };
+  const metrics = [
+    { label: 'Total Processed', value: total, color: 'text-zinc-100' },
+    { label: 'Auto-Recovered', value: recovered, color: 'text-emerald-400' },
+    { label: 'Customer Notified', value: notified, color: 'text-blue-400' },
+    { label: 'Human Review', value: humanReview, color: 'text-amber-400' },
+    { label: 'Blocked / Risk', value: blocked, color: 'text-red-400' },
+  ];
 
   return (
-    <div className="min-h-screen bg-[#09090b] text-[#f4f4f5] p-6 lg:p-12 font-sans">
-      <div className="max-w-7xl mx-auto">
-        
+    <div className="min-h-screen bg-zinc-950 text-zinc-100 font-sans">
+      <div className="max-w-7xl mx-auto p-6 lg:p-10">
+
         {/* Header */}
-        <header className="flex flex-col sm:flex-row justify-between items-start sm:items-end mb-12 border-b border-[#27272a] pb-6">
+        <header className="flex flex-col sm:flex-row justify-between items-start sm:items-end mb-10 border-b border-zinc-800 pb-6">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight mb-1">RecoverX</h1>
-            <p className="text-sm text-[#a1a1aa] font-medium tracking-wide uppercase">Revenue Recovery Ledger</p>
+            <p className="text-xs font-semibold tracking-[0.2em] uppercase text-zinc-500 mb-1">Revenue Recovery</p>
+            <h1 className="text-2xl font-bold tracking-tight">RecoverX</h1>
           </div>
-          <div className="mt-4 sm:mt-0 flex items-center gap-3">
-            <span className="text-xs text-[#a1a1aa] font-mono bg-[#18181b] border border-[#27272a] px-3 py-1.5 rounded-sm">
-              BATCH: {records[0]?.batch_run_id?.substring(0,8) || 'N/A'}
-            </span>
+          <div className="mt-4 sm:mt-0 text-xs font-mono text-zinc-600 bg-zinc-900 border border-zinc-800 px-3 py-1.5 rounded-sm">
+            BATCH: {records[0]?.batch_run_id?.substring(0, 8) ?? 'N/A'}
           </div>
         </header>
 
-        {/* Metrics Grid */}
-        <section className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-12">
-          {[
-            { label: 'Total Processed', value: total, color: 'text-[#f4f4f5]' },
-            { label: 'Auto-Recovered', value: recovered, color: 'text-[#10b981]' },
-            { label: 'Customer Notified', value: notified, color: 'text-[#3b82f6]' },
-            { label: 'Human Review', value: humanReview, color: 'text-[#f59e0b]' },
-            { label: 'Blocked / Risk', value: blocked, color: 'text-[#ef4444]' },
-          ].map((metric) => (
-            <div key={metric.label} className="bg-[#18181b] border border-[#27272a] p-5 rounded-sm flex flex-col justify-between h-28">
-              <span className="text-xs font-semibold tracking-wider text-[#a1a1aa] uppercase">{metric.label}</span>
-              <span className={`text-3xl font-bold tracking-tight ${metric.color}`}>{metric.value}</span>
+        {/* Metrics */}
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-10">
+          {metrics.map(m => (
+            <div key={m.label} className="bg-zinc-900 border border-zinc-800 rounded-sm p-4 flex flex-col gap-2">
+              <span className="text-xs font-semibold uppercase tracking-wider text-zinc-500">{m.label}</span>
+              <span className={`text-3xl font-bold tracking-tight ${m.color}`}>{m.value}</span>
             </div>
           ))}
-        </section>
+        </div>
 
-        {/* Ledger Table */}
-        <section className="bg-[#18181b] border border-[#27272a] rounded-sm overflow-hidden">
-          <div className="px-6 py-4 border-b border-[#27272a] bg-[#18181b]">
-            <h2 className="text-sm font-semibold tracking-wide uppercase text-[#f4f4f5]">Transaction Output Log</h2>
+        {/* Table */}
+        <div className="bg-zinc-900 border border-zinc-800 rounded-sm overflow-hidden">
+          <div className="px-6 py-3.5 border-b border-zinc-800 flex items-center justify-between">
+            <h2 className="text-xs font-bold uppercase tracking-widest text-zinc-400">Transaction Output Log</h2>
+            <span className="text-xs text-zinc-600">{total} records · click row to inspect</span>
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
+            <table className="w-full text-left text-sm">
               <thead>
-                <tr className="bg-[#09090b] text-[#a1a1aa] text-xs uppercase tracking-wider">
-                  <th className="px-6 py-3 font-medium border-b border-[#27272a]">Transaction ID</th>
-                  <th className="px-6 py-3 font-medium border-b border-[#27272a]">Root Cause (AI)</th>
-                  <th className="px-6 py-3 font-medium border-b border-[#27272a]">Confidence</th>
-                  <th className="px-6 py-3 font-medium border-b border-[#27272a]">Proposed Action</th>
-                  <th className="px-6 py-3 font-medium border-b border-[#27272a]">Final Outcome</th>
+                <tr className="text-xs uppercase tracking-wider text-zinc-500 bg-zinc-950/50">
+                  <th className="px-6 py-3 font-medium border-b border-zinc-800">ID</th>
+                  <th className="px-6 py-3 font-medium border-b border-zinc-800">Root Cause</th>
+                  <th className="px-6 py-3 font-medium border-b border-zinc-800">Confidence</th>
+                  <th className="px-6 py-3 font-medium border-b border-zinc-800">Action</th>
+                  <th className="px-6 py-3 font-medium border-b border-zinc-800">Outcome</th>
+                  <th className="px-6 py-3 font-medium border-b border-zinc-800"></th>
                 </tr>
               </thead>
-              <tbody className="text-sm divide-y divide-[#27272a]">
+              <tbody className="divide-y divide-zinc-800/50">
                 {records.map((record) => (
-                  <tr 
-                    key={record.transaction_id} 
-                    className="hover:bg-[#27272a]/30 transition-colors cursor-pointer"
+                  <tr
+                    key={record.transaction_id}
+                    className="hover:bg-zinc-800/30 transition-colors cursor-pointer"
                     onClick={() => setSelectedRecord(record)}
                   >
-                    <td className="px-6 py-4 font-mono text-xs text-[#a1a1aa]">{record.transaction_id}</td>
-                    <td className="px-6 py-4 font-medium">{record.diagnosis?.root_cause || 'unknown'}</td>
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-3">
-                        <div className="w-12 h-1 bg-[#27272a] rounded-full overflow-hidden">
-                          <div 
-                            className="h-full bg-[#2563eb]" 
-                            style={{ width: `${(record.diagnosis?.confidence || 0) * 100}%` }}
-                          />
-                        </div>
-                        <span className="text-xs font-mono text-[#a1a1aa]">{(record.diagnosis?.confidence || 0).toFixed(2)}</span>
-                      </div>
+                    <td className="px-6 py-3.5 font-mono text-xs text-zinc-400">{record.transaction_id}</td>
+                    <td className="px-6 py-3.5 text-zinc-200 font-medium">{record.diagnosis?.root_cause ?? 'unknown'}</td>
+                    <td className="px-6 py-3.5">
+                      <ConfidenceBar value={record.diagnosis?.confidence ?? 0} />
                     </td>
-                    <td className="px-6 py-4 font-mono text-xs text-[#a1a1aa]">{record.proposed_action || 'N/A'}</td>
-                    <td className="px-6 py-4">{getStatusBadge(record.outcome)}</td>
+                    <td className="px-6 py-3.5 font-mono text-xs text-zinc-400">{record.proposed_action ?? 'N/A'}</td>
+                    <td className="px-6 py-3.5">{getStatusBadge(record.outcome)}</td>
+                    <td className="px-6 py-3.5 text-zinc-600">
+                      <Info className="w-3.5 h-3.5" />
+                    </td>
                   </tr>
                 ))}
-                {records.length === 0 && (
-                  <tr>
-                    <td colSpan={5} className="px-6 py-12 text-center text-[#a1a1aa] text-sm">
-                      No records found in Firestore. Run the batch script.
-                    </td>
-                  </tr>
-                )}
               </tbody>
             </table>
           </div>
-        </section>
-
-        {/* Audit Trail Modal */}
-        {selectedRecord && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80" onClick={() => setSelectedRecord(null)}>
-            <div className="bg-[#09090b] border border-[#27272a] w-full max-w-3xl max-h-[85vh] rounded-sm flex flex-col shadow-2xl" onClick={e => e.stopPropagation()}>
-              
-              <div className="flex items-center justify-between px-6 py-4 border-b border-[#27272a] bg-[#18181b]">
-                <div className="flex items-center gap-3">
-                  <Terminal className="w-4 h-4 text-[#2563eb]" />
-                  <h3 className="text-sm font-semibold tracking-wide uppercase">Audit Trail</h3>
-                  <span className="text-xs font-mono text-[#a1a1aa] bg-[#09090b] px-2 py-1 rounded-sm border border-[#27272a] ml-2">
-                    {selectedRecord.transaction_id}
-                  </span>
-                </div>
-                <button 
-                  className="text-[#a1a1aa] hover:text-[#f4f4f5] transition-colors p-1"
-                  onClick={() => setSelectedRecord(null)}
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-              
-              <div className="p-6 overflow-y-auto font-mono text-xs text-[#a1a1aa] space-y-6">
-                {selectedRecord.audit_trail?.map((step, idx) => (
-                  <div key={idx} className="relative pl-6">
-                    <div className="absolute left-0 top-1.5 w-1.5 h-1.5 bg-[#2563eb] rounded-full ring-4 ring-[#09090b]"></div>
-                    {idx !== selectedRecord.audit_trail.length - 1 && (
-                      <div className="absolute left-[2px] top-4 bottom-[-1.5rem] w-px bg-[#27272a]"></div>
-                    )}
-                    
-                    <div className="font-semibold text-[#f4f4f5] mb-2 uppercase tracking-wide flex items-center gap-2">
-                      <span className="text-[#2563eb]">{step.node}</span>
-                      <span className="text-[#a1a1aa]/50">/</span>
-                      <span className="text-[#a1a1aa]">{step.event}</span>
-                    </div>
-                    
-                    <pre className="bg-[#18181b] border border-[#27272a] p-4 rounded-sm overflow-x-auto whitespace-pre-wrap leading-relaxed">
-                      {JSON.stringify(step, null, 2)}
-                    </pre>
-                  </div>
-                ))}
-                {(!selectedRecord.audit_trail || selectedRecord.audit_trail.length === 0) && (
-                  <div className="italic text-center py-8">No audit events found.</div>
-                )}
-              </div>
-              
-            </div>
-          </div>
-        )}
+        </div>
       </div>
+
+      {/* Evidence Panel (slide-in) */}
+      {selectedRecord && (
+        <EvidencePanel record={selectedRecord} onClose={() => setSelectedRecord(null)} />
+      )}
     </div>
   );
 }

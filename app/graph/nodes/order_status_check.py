@@ -1,10 +1,15 @@
 import os
 import razorpay
+from datetime import datetime, timezone
 from dotenv import load_dotenv
 
 from app.graph.state import RecoveryState
 
 load_dotenv()
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 # Order states that mean the payment has already gone through.
 RESOLVED_STATUSES = {"paid", "captured"}
@@ -53,6 +58,7 @@ def order_status_check(state: RecoveryState) -> dict:
                     "node": "order_status_check",
                     "event": "no_order_id",
                     "reason": "transaction has no order_id — treating as unpaid to avoid blocking a legitimate retry.",
+                    "timestamp": _now(),
                 }
             ],
         }
@@ -76,6 +82,7 @@ def order_status_check(state: RecoveryState) -> dict:
                     "order_id": order_id,
                     "error": str(e),
                     "fallback": "treating as unpaid",
+                    "timestamp": _now(),
                 }
             ],
         }
@@ -88,6 +95,7 @@ def order_status_check(state: RecoveryState) -> dict:
             "order_id": order_id,
             "order_status": order_status,
             "reason": "Order already resolved. Execution blocked to prevent double charge.",
+            "timestamp": _now(),
         }
     else:
         audit_event = {
@@ -95,6 +103,7 @@ def order_status_check(state: RecoveryState) -> dict:
             "event": "unpaid_confirmed",
             "order_id": order_id,
             "order_status": order_status,
+            "timestamp": _now(),
         }
 
     return {

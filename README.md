@@ -1,6 +1,6 @@
 # RecoverX — AI-Powered Payment Revenue Recovery Agent
 
-Razorpay AI Buildathon 2026. FastAPI + LangGraph + Pydantic.
+Razorpay AI Buildathon 2026. FastAPI + LangGraph + React + Firebase.
 
 ## What it does
 
@@ -12,9 +12,19 @@ only an approved action, and records a complete audit trail.
 Audit records everything.** The LLM never directly chooses or executes a money-affecting
 action.
 
-## Status
+## Architecture
 
-Phase 1: project skeleton only. Nodes are empty stubs — logic comes in Phase 2.
+1. **Ingest**: Receives a failed transaction.
+2. **Classify (AI)**: Uses Gemini to analyze the Razorpay error payload and determine the root cause (with a confidence score).
+3. **Decide**: Deterministically maps the root cause to a proposed policy action (e.g., `retry`, `customer_nudge`, `human_review`). Overrides actions to `human_review` if confidence is low.
+4. **Guardrails**: Applies strict safety checks (e.g., blocks if max retries exceeded or fraud risk detected).
+5. **Order Status Check**: For money-moving actions, verifies the order is actually unpaid via the Razorpay API before proceeding.
+6. **Execute**: Performs the final action (e.g., generating a Razorpay Payment Link for a retry).
+7. **Audit**: Appends a complete, time-stamped execution timeline and result to Firestore for the dashboard.
+
+## Known Limitations
+
+**Execution Idempotency**: Execution idempotency (preventing duplicate Payment Links on a re-run of the same recovery attempt) is not yet implemented — order-status verification prevents double-charging the customer, but a workflow re-run could currently create a second unused Payment Link for the same failure.
 
 ## Honest-uncertainty example
 
@@ -28,10 +38,15 @@ uncertainty rather than guessing.
 
 `authentication_failure` and `customer_action_required` have inherent definitional overlap for OTP/CVV-type failures (both require the customer to take an action to resolve). The LLM may classify an OTP failure as either. This is functionally harmless because the policy table maps both of these root causes to the exact same customer-notification outcome downstream, so the ambiguity does not affect system behavior.
 
-## Setup (Windows)
+## Setup & Deployment
 
-\`\`\`powershell
+**Backend (Local Batch Run)**:
+```powershell
 python -m venv venv
 venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-\`\`\`
+python batch_run.py
+```
+
+**Frontend (Dashboard)**:
+Run locally with `npm run dev` in the `frontend/` directory. (Designed for Vercel deployment).
