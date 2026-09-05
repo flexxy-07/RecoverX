@@ -13,6 +13,18 @@ trail to Firestore for the dashboard.
 **The LLM diagnoses. Deterministic code decides. Guardrails authorize. The LLM never
 directly chooses or executes a money-affecting action.**
 
+## Tech Stack
+
+**Backend / AI:**
+- **LangGraph**: Orchestrates the 7-node recovery state machine
+- **Google GenAI SDK**: Powers the `classify` node for root-cause diagnosis
+- **Razorpay Python SDK**: Verifies live order status and generates Payment Links
+- **Rich**: Formats terminal output for the batch and demo scripts
+
+**Frontend / Data:**
+- **React + Vite + TailwindCSS**: Powers the analytics dashboard
+- **Firebase / Firestore**: Persists the recovery runs and audit trail
+
 ## Architecture
 
 ![RecoverX Architecture](architecture.png)
